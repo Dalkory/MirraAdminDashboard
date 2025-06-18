@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  db:
+    container_name: postgres_db
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: admin-dashboard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - admin-dashboard-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - admin-dashboard-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  admindashboard:
+    container_name: admindashboard_backend
+    build:
+      context: .
+      dockerfile: AdminDashboard/Dockerfile
+    ports:
+      - "5000:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=admin-dashboard;Username=postgres;Password=postgres
+      - ConnectionStrings__Redis=redis:6379
+      - JWT__Secret=${JWT_SECRET:-JWTAuthenticationHIGHsecuredPasswordVVVp1OH7Xzyr}
+      - JWT__ValidAudience=${JWT_AUDIENCE:-http://localhost:5000}
+      - JWT__ValidIssuer=${JWT_ISSUER:-http://localhost:5000}
+      - ASPNETCORE_URLS=http://+:80
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - admin-dashboard-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  client:
+    container_name: admindashboard_frontend
+    build:
+      context: ../../frontend/client
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=/api
+    depends_on:
+      admindashboard:
+        condition: service_started
+    networks:
+      - admin-dashboard-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  admin-dashboard-net:
+    driver: bridge
+    attachable: true
+
+volumes:
+  postgres_data:
+  redis_data:
